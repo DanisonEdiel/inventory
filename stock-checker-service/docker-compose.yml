@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8001:8001"
+    depends_on:
+      - db
+      - redis
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=inventory
+      - POSTGRES_PORT=5432
+      - USE_REDIS_CACHE=true
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - ./:/app
+    networks:
+      - inventory-network
+
+  db:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=inventory
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - inventory-network
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - inventory-network
+
+networks:
+  inventory-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

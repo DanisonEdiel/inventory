@@ -1,0 +1,77 @@
+name: Infrastructure Deployment
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/infrastructure-cd.yml'
+  workflow_dispatch:
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+          
+      - name: Terraform Validate
+        run: |
+          cd terraform
+          terraform validate
+          
+      - name: Terraform Plan
+        run: |
+          cd terraform
+          terraform plan -var="db_password=${{ secrets.DB_PASSWORD }}" -var="ssh_key_name=${{ secrets.SSH_KEY_NAME }}"
+        
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd terraform
+          terraform apply -auto-approve -var="db_password=${{ secrets.DB_PASSWORD }}" -var="ssh_key_name=${{ secrets.SSH_KEY_NAME }}"
+          
+      - name: Save Terraform Outputs
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd terraform
+          echo "STOCK_UPDATER_IP=$(terraform output -raw stock_updater_public_ip)" >> $GITHUB_ENV
+          echo "STOCK_CHECKER_IP=$(terraform output -raw stock_checker_public_ip)" >> $GITHUB_ENV
+          echo "SUPPLIER_SYNC_IP=$(terraform output -raw supplier_sync_public_ip)" >> $GITHUB_ENV
+          echo "RABBITMQ_IP=$(terraform output -raw rabbitmq_public_ip)" >> $GITHUB_ENV
+          echo "RDS_ENDPOINT=$(terraform output -raw rds_endpoint)" >> $GITHUB_ENV
+          
+      - name: Create Deployment Summary
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "## Deployment Summary" > deployment.md
+          echo "Infrastructure successfully deployed!" >> deployment.md
+          echo "" >> deployment.md
+          echo "### Endpoints" >> deployment.md
+          echo "- Stock Updater Service: http://${STOCK_UPDATER_IP}:8000" >> deployment.md
+          echo "- Stock Checker Service: http://${STOCK_CHECKER_IP}:8001" >> deployment.md
+          echo "- Supplier Sync Service: http://${SUPPLIER_SYNC_IP}:8002" >> deployment.md
+          echo "- RabbitMQ Management: http://${RABBITMQ_IP}:15672" >> deployment.md
+          echo "- RDS Endpoint: ${RDS_ENDPOINT}" >> deployment.md
+          
+      - name: Create GitHub Deployment
+        if: github.ref == 'refs/heads/main'
+        uses: chrnorm/deployment-action@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          environment: production
+          description: "Infrastructure deployment"

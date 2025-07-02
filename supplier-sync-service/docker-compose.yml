@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8002:8002"
+    depends_on:
+      - db
+      - rabbitmq
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=inventory
+      - POSTGRES_PORT=5432
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+      - RABBITMQ_VHOST=/
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./:/app
+    networks:
+      - inventory-network
+
+  celery_worker:
+    build: .
+    depends_on:
+      - app
+      - rabbitmq
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=inventory
+      - POSTGRES_PORT=5432
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+      - RABBITMQ_VHOST=/
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./:/app
+    command: celery -A app.celery_app worker --loglevel=info
+    networks:
+      - inventory-network
+
+  celery_beat:
+    build: .
+    depends_on:
+      - app
+      - rabbitmq
+      - celery_worker
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=inventory
+      - POSTGRES_PORT=5432
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+      - RABBITMQ_VHOST=/
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672/
+      - SYNC_SCHEDULE=0 0 * * *
+    volumes:
+      - ./:/app
+    command: celery -A app.celery_app beat --loglevel=info
+    networks:
+      - inventory-network
+
+  db:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=inventory
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - inventory-network
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - inventory-network
+
+networks:
+  inventory-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
