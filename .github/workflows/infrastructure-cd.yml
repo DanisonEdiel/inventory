@@ -28,9 +28,10 @@ jobs:
         run: |
           if [ -d "stock-updater-service" ]; then
             cd stock-updater-service
+            export PYTHONPATH=$PYTHONPATH:$(pwd)
             python -m pip install --upgrade pip
             pip install -r requirements.txt
-            pytest app/tests/ || exit 1
+            python -m pytest app/tests/ -v || exit 1
             cd ..
           fi
       
@@ -40,9 +41,10 @@ jobs:
         run: |
           if [ -d "stock-checker-service" ]; then
             cd stock-checker-service
+            export PYTHONPATH=$PYTHONPATH:$(pwd)
             python -m pip install --upgrade pip
             pip install -r requirements.txt
-            pytest app/tests/ || exit 1
+            python -m pytest app/tests/ -v || exit 1
             cd ..
           fi
       
@@ -52,9 +54,10 @@ jobs:
         run: |
           if [ -d "supplier-sync-service" ]; then
             cd supplier-sync-service
+            export PYTHONPATH=$PYTHONPATH:$(pwd)
             python -m pip install --upgrade pip
             pip install -r requirements.txt
-            pytest app/tests/ || exit 1
+            python -m pytest app/tests/ -v || exit 1
             cd ..
           fi
   
