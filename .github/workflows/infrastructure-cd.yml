@@ -1,15 +1,65 @@
-name: Infrastructure Deployment
+name: Inventory System Deployment
 
 on:
   push:
     branches: [ main ]
     paths:
       - 'terraform/**'
+      - 'stock-updater-service/**'
+      - 'stock-checker-service/**'
+      - 'supplier-sync-service/**'
       - '.github/workflows/infrastructure-cd.yml'
   workflow_dispatch:
 
 jobs:
-  terraform:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      # Test Stock Updater Service
+      - name: Test Stock Updater
+        if: ${{ !contains(github.event.head_commit.message, '[skip tests]') }}
+        run: |
+          if [ -d "stock-updater-service" ]; then
+            cd stock-updater-service
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+            pytest app/tests/ || exit 1
+            cd ..
+          fi
+      
+      # Test Stock Checker Service
+      - name: Test Stock Checker
+        if: ${{ !contains(github.event.head_commit.message, '[skip tests]') }}
+        run: |
+          if [ -d "stock-checker-service" ]; then
+            cd stock-checker-service
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+            pytest app/tests/ || exit 1
+            cd ..
+          fi
+      
+      # Test Supplier Sync Service
+      - name: Test Supplier Sync
+        if: ${{ !contains(github.event.head_commit.message, '[skip tests]') }}
+        run: |
+          if [ -d "supplier-sync-service" ]; then
+            cd supplier-sync-service
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+            pytest app/tests/ || exit 1
+            cd ..
+          fi
+  
+  deploy-infrastructure:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -19,6 +69,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ secrets.AWS_REGION }}
           
       - name: Setup Terraform
@@ -55,11 +106,59 @@ jobs:
           echo "RABBITMQ_IP=$(terraform output -raw rabbitmq_public_ip)" >> $GITHUB_ENV
           echo "RDS_ENDPOINT=$(terraform output -raw rds_endpoint)" >> $GITHUB_ENV
           
+  deploy-services:
+    needs: deploy-infrastructure
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      # Deploy Stock Updater Service
+      - name: Deploy Stock Updater Service
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.STOCK_UPDATER_IP }}
+          username: ec2-user
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/inventory/stock-updater-service
+            git pull
+            docker-compose down
+            docker-compose build --no-cache
+            docker-compose up -d
+      
+      # Deploy Stock Checker Service
+      - name: Deploy Stock Checker Service
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.STOCK_CHECKER_IP }}
+          username: ec2-user
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/inventory/stock-checker-service
+            git pull
+            docker-compose down
+            docker-compose build --no-cache
+            docker-compose up -d
+      
+      # Deploy Supplier Sync Service
+      - name: Deploy Supplier Sync Service
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.SUPPLIER_SYNC_IP }}
+          username: ec2-user
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/inventory/supplier-sync-service
+            git pull
+            docker-compose down
+            docker-compose build --no-cache
+            docker-compose up -d
+            
       - name: Create Deployment Summary
-        if: github.ref == 'refs/heads/main'
         run: |
           echo "## Deployment Summary" > deployment.md
-          echo "Infrastructure successfully deployed!" >> deployment.md
+          echo "All services successfully deployed!" >> deployment.md
           echo "" >> deployment.md
           echo "### Endpoints" >> deployment.md
           echo "- Stock Updater Service: http://${STOCK_UPDATER_IP}:8000" >> deployment.md
@@ -69,9 +168,8 @@ jobs:
           echo "- RDS Endpoint: ${RDS_ENDPOINT}" >> deployment.md
           
       - name: Create GitHub Deployment
-        if: github.ref == 'refs/heads/main'
         uses: chrnorm/deployment-action@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           environment: production
-          description: "Infrastructure deployment"
+          description: "Complete inventory system deployment"

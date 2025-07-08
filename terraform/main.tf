@@ -186,12 +186,12 @@ resource "aws_db_instance" "postgres" {
   allocated_storage      = 20
   storage_type           = "gp2"
   engine                 = "postgres"
-  engine_version         = "15.3"
+  engine_version         = "16"
   instance_class         = var.db_instance_type
   db_name                = "inventory"
   username               = var.db_username
   password               = var.db_password
-  parameter_group_name   = "default.postgres15"
+  parameter_group_name   = "default.postgres16"
   db_subnet_group_name   = aws_db_subnet_group.rds_subnet_group.name
   vpc_security_group_ids = [aws_security_group.rds_sg.id]
   skip_final_snapshot    = true
@@ -219,6 +219,11 @@ resource "aws_instance" "stock_updater" {
     db_name     = aws_db_instance.postgres.db_name
     db_user     = aws_db_instance.postgres.username
     db_password = aws_db_instance.postgres.password
+    RABBITMQ_HOST = aws_instance.rabbitmq.private_ip
+    RABBITMQ_PORT = "5672"
+    RABBITMQ_USER = "guest"
+    RABBITMQ_PASSWORD = "guest"
+    RABBITMQ_VHOST = "/"
   })
 
   root_block_device {
@@ -273,6 +278,14 @@ resource "aws_instance" "supplier_sync" {
     db_name     = aws_db_instance.postgres.db_name
     db_user     = aws_db_instance.postgres.username
     db_password = aws_db_instance.postgres.password
+    RABBITMQ_HOST = aws_instance.rabbitmq.private_ip
+    RABBITMQ_PORT = "5672"
+    RABBITMQ_USER = "guest"
+    RABBITMQ_PASSWORD = "guest"
+    RABBITMQ_VHOST = "/"
+    CELERY_BROKER_URL = "amqp://guest:guest@${aws_instance.rabbitmq.private_ip}:5672/"
+    CELERY_RESULT_BACKEND = "db+postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}/${aws_db_instance.postgres.db_name}"
+    SYNC_SCHEDULE = "*/30 * * * *"
   })
 
   root_block_device {
