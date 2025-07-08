@@ -7,6 +7,7 @@ on:
       - 'stock-updater-service/**'
       - 'stock-checker-service/**'
       - 'supplier-sync-service/**'
+      - 'supplier-order-creator/**'
       - '.github/workflows/infrastructure-cd.yml'
   workflow_dispatch:
 
@@ -31,12 +32,6 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    env:
-      STOCK_UPDATER_IP: ${{ secrets.STOCK_UPDATER_IP }}
-      STOCK_CHECKER_IP: ${{ secrets.STOCK_CHECKER_IP }}
-      SUPPLIER_SYNC_IP: ${{ secrets.SUPPLIER_SYNC_IP }}
-      RABBITMQ_IP: ${{ secrets.RABBITMQ_IP }}
-      RDS_ENDPOINT: ${{ secrets.RDS_ENDPOINT }}
     steps:
       - uses: actions/checkout@v3
       
@@ -44,8 +39,8 @@ jobs:
       - name: Deploy Stock Updater Service
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ env.STOCK_UPDATER_IP }}
-          username: ec2-user
+          host: ${{ secrets.STOCK_UPDATER_IP }}
+          username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /opt/inventory/stock-updater-service
@@ -58,8 +53,8 @@ jobs:
       - name: Deploy Stock Checker Service
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ env.STOCK_CHECKER_IP }}
-          username: ec2-user
+          host: ${{ secrets.STOCK_CHECKER_IP }}
+          username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /opt/inventory/stock-checker-service
@@ -72,11 +67,25 @@ jobs:
       - name: Deploy Supplier Sync Service
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ env.SUPPLIER_SYNC_IP }}
-          username: ec2-user
+          host: ${{ secrets.SUPPLIER_SYNC_IP }}
+          username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /opt/inventory/supplier-sync-service
+            git pull
+            docker-compose down
+            docker-compose build --no-cache
+            docker-compose up -d
+            
+      # Deploy Supplier Order Creator Service
+      - name: Deploy Supplier Order Creator Service
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SUPPLIER_ORDER_CREATOR_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/inventory/supplier-order-creator
             git pull
             docker-compose down
             docker-compose build --no-cache
@@ -88,11 +97,12 @@ jobs:
           echo "All services successfully deployed!" >> deployment.md
           echo "" >> deployment.md
           echo "### Endpoints" >> deployment.md
-          echo "- Stock Updater Service: http://${STOCK_UPDATER_IP}:8000" >> deployment.md
-          echo "- Stock Checker Service: http://${STOCK_CHECKER_IP}:8001" >> deployment.md
-          echo "- Supplier Sync Service: http://${SUPPLIER_SYNC_IP}:8002" >> deployment.md
-          echo "- RabbitMQ Management: http://${RABBITMQ_IP}:15672" >> deployment.md
-          echo "- RDS Endpoint: ${RDS_ENDPOINT}" >> deployment.md
+          echo "- Stock Updater Service: http://${{ secrets.STOCK_UPDATER_IP }}:8000" >> deployment.md
+          echo "- Stock Checker Service: http://${{ secrets.STOCK_CHECKER_IP }}:8001" >> deployment.md
+          echo "- Supplier Sync Service: http://${{ secrets.SUPPLIER_SYNC_IP }}:8002" >> deployment.md
+          echo "- Supplier Order Creator Service: http://${{ secrets.SUPPLIER_ORDER_CREATOR_IP }}:8003" >> deployment.md
+          echo "- RabbitMQ Management: http://${{ secrets.RABBITMQ_IP }}:15672" >> deployment.md
+          echo "- RDS Endpoint: ${{ secrets.RDS_ENDPOINT }}" >> deployment.md
           
       - name: Create GitHub Deployment
         uses: chrnorm/deployment-action@v2
