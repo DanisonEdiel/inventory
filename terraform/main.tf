@@ -111,7 +111,7 @@ resource "aws_security_group" "ec2_sg" {
   # Application ports
   ingress {
     from_port   = 8000
-    to_port     = 8002
+    to_port     = 8003
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -371,3 +371,43 @@ resource "aws_eip" "rabbitmq_eip" {
     }
   )
 }
+
+# Supplier Order Creator EC2 Instance
+resource "aws_instance" "supplier_order_creator" {
+  ami                    = var.ec2_ami
+  instance_type          = var.ec2_instance_type
+  key_name               = var.ssh_key_name
+  subnet_id              = aws_subnet.public_subnet[0].id
+  vpc_security_group_ids = [aws_security_group.ec2_sg.id]
+  associate_public_ip_address = true
+  user_data              = templatefile("${path.module}/scripts/setup_supplier_order_creator.sh", {
+    db_host     = aws_db_instance.postgres.address
+    db_port     = aws_db_instance.postgres.port
+    db_name     = aws_db_instance.postgres.db_name
+    db_user     = aws_db_instance.postgres.username
+    db_password = aws_db_instance.postgres.password
+    RABBITMQ_HOST = aws_instance.rabbitmq.private_ip
+    RABBITMQ_PORT = "5672"
+    RABBITMQ_USER = "guest"
+    RABBITMQ_PASSWORD = "guest"
+    RABBITMQ_VHOST = "/"
+    CELERY_BROKER_URL = "amqp://guest:guest@${aws_instance.rabbitmq.private_ip}:5672/"
+    CELERY_RESULT_BACKEND = "db+postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}/${aws_db_instance.postgres.db_name}"
+    ORDER_SCHEDULE = "0 */2 * * *"
+  })
+
+  root_block_device {
+    volume_size = 20
+    volume_type = "gp2"
+  }
+
+  tags = merge(
+    var.common_tags,
+    {
+      Name = "inventory-supplier-order-creator"
+    }
+  )
+}
+
+# No se usa IP elástica para supplier-order-creator debido al límite de IPs elásticas
+# Se usa la IP pública dinámica asignada por AWS
