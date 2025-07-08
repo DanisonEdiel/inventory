@@ -35,6 +35,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
+      # Login to Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      
       # Deploy Stock Updater Service
       - name: Deploy Stock Updater Service
         uses: appleboy/ssh-action@master
@@ -43,11 +50,89 @@ jobs:
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /opt/inventory/stock-updater-service
-            git pull
-            docker-compose down
-            docker-compose build --no-cache
-            docker-compose up -d
+            # Crear directorio de trabajo
+            mkdir -p ~/app/stock-updater
+            cd ~/app/stock-updater
+            
+            # Asegurarse de que Docker está instalado
+            if ! command -v docker &> /dev/null; then
+              echo "Docker no está instalado. Instalando..."
+              sudo apt-get update
+              sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+              sudo add-apt-repository "deb [arch=$(dpkg --print-architecture)] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+              sudo apt-get update
+              sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+              sudo usermod -aG docker $USER
+              sudo systemctl start docker
+              sudo systemctl enable docker
+            fi
+            
+            # Verificar que docker compose funciona
+            if ! sudo docker compose version &> /dev/null; then
+              echo "Docker Compose no está funcionando correctamente. Instalando plugin..."
+              sudo apt-get update
+              sudo apt-get install -y docker-compose-plugin
+            fi
+            
+            # Mostrar versiones instaladas
+            sudo docker --version
+            sudo docker compose version
+            
+            # Login a Docker Hub
+            echo "${{ secrets.DOCKER_TOKEN }}" | sudo docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+            
+            # Detener y eliminar contenedores existentes
+            echo "Deteniendo contenedores existentes..."
+            sudo docker compose down || true
+            sudo docker rm -f stock-updater-service || true
+            
+            # Eliminar imágenes antiguas
+            echo "Eliminando imágenes antiguas..."
+            sudo docker rmi -f ${{ secrets.DOCKER_USERNAME }}/stock-updater-service:latest || true
+            
+            # Forzar pull de la imagen más reciente
+            echo "Descargando imagen más reciente..."
+            sudo docker pull ${{ secrets.DOCKER_USERNAME }}/stock-updater-service:latest
+            
+            # Crear .env file con secretos
+            cat > .env << EOL
+            DATABASE_URL=${{ secrets.DATABASE_URL || format('postgresql://{0}:{1}@{2}:{3}/{4}', secrets.DB_USER, secrets.DB_PASSWORD, secrets.DB_HOST, secrets.DB_PORT, secrets.DB_NAME) }}
+            RABBITMQ_HOST=${{ secrets.RABBITMQ_HOST }}
+            RABBITMQ_PORT=${{ secrets.RABBITMQ_PORT }}
+            RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
+            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+            RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
+            EOL
+            
+            # Crear docker-compose.yml
+            cat > docker-compose.yml << EOL
+            version: "3.8"
+            
+            services:
+              stock-updater:
+                image: ${{ secrets.DOCKER_USERNAME }}/stock-updater-service:latest
+                container_name: stock-updater-service
+                restart: always
+                ports:
+                  - "8000:8000"
+                env_file:
+                  - .env
+                networks:
+                  - inventory-network
+            
+            networks:
+              inventory-network:
+                driver: bridge
+            EOL
+            
+            # Iniciar servicios
+            echo "Iniciando servicios..."
+            sudo docker compose up -d --force-recreate
+            
+            # Verificar estado
+            echo "Estado de los contenedores:"
+            sudo docker ps
       
       # Deploy Stock Checker Service
       - name: Deploy Stock Checker Service
@@ -57,11 +142,80 @@ jobs:
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /opt/inventory/stock-checker-service
-            git pull
-            docker-compose down
-            docker-compose build --no-cache
-            docker-compose up -d
+            # Crear directorio de trabajo
+            mkdir -p ~/app/stock-checker
+            cd ~/app/stock-checker
+            
+            # Asegurarse de que Docker está instalado
+            if ! command -v docker &> /dev/null; then
+              echo "Docker no está instalado. Instalando..."
+              sudo apt-get update
+              sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+              sudo add-apt-repository "deb [arch=$(dpkg --print-architecture)] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+              sudo apt-get update
+              sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+              sudo usermod -aG docker $USER
+              sudo systemctl start docker
+              sudo systemctl enable docker
+            fi
+            
+            # Verificar que docker compose funciona
+            if ! sudo docker compose version &> /dev/null; then
+              echo "Docker Compose no está funcionando correctamente. Instalando plugin..."
+              sudo apt-get update
+              sudo apt-get install -y docker-compose-plugin
+            fi
+            
+            # Login a Docker Hub
+            echo "${{ secrets.DOCKER_TOKEN }}" | sudo docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+            
+            # Detener y eliminar contenedores existentes
+            echo "Deteniendo contenedores existentes..."
+            sudo docker compose down || true
+            sudo docker rm -f stock-checker-service || true
+            
+            # Eliminar imágenes antiguas
+            echo "Eliminando imágenes antiguas..."
+            sudo docker rmi -f ${{ secrets.DOCKER_USERNAME }}/stock-checker-service:latest || true
+            
+            # Forzar pull de la imagen más reciente
+            echo "Descargando imagen más reciente..."
+            sudo docker pull ${{ secrets.DOCKER_USERNAME }}/stock-checker-service:latest
+            
+            # Crear .env file con secretos
+            cat > .env << EOL
+            DATABASE_URL=${{ secrets.DATABASE_URL || format('postgresql://{0}:{1}@{2}:{3}/{4}', secrets.DB_USER, secrets.DB_PASSWORD, secrets.DB_HOST, secrets.DB_PORT, secrets.DB_NAME) }}
+            EOL
+            
+            # Crear docker-compose.yml
+            cat > docker-compose.yml << EOL
+            version: "3.8"
+            
+            services:
+              stock-checker:
+                image: ${{ secrets.DOCKER_USERNAME }}/stock-checker-service:latest
+                container_name: stock-checker-service
+                restart: always
+                ports:
+                  - "8001:8001"
+                env_file:
+                  - .env
+                networks:
+                  - inventory-network
+            
+            networks:
+              inventory-network:
+                driver: bridge
+            EOL
+            
+            # Iniciar servicios
+            echo "Iniciando servicios..."
+            sudo docker compose up -d --force-recreate
+            
+            # Verificar estado
+            echo "Estado de los contenedores:"
+            sudo docker ps
       
       # Deploy Supplier Sync Service
       - name: Deploy Supplier Sync Service
@@ -71,11 +225,88 @@ jobs:
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /opt/inventory/supplier-sync-service
-            git pull
-            docker-compose down
-            docker-compose build --no-cache
-            docker-compose up -d
+            # Crear directorio de trabajo
+            mkdir -p ~/app/supplier-sync
+            cd ~/app/supplier-sync
+            
+            # Asegurarse de que Docker está instalado
+            if ! command -v docker &> /dev/null; then
+              echo "Docker no está instalado. Instalando..."
+              sudo apt-get update
+              sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+              sudo add-apt-repository "deb [arch=$(dpkg --print-architecture)] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+              sudo apt-get update
+              sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+              sudo usermod -aG docker $USER
+              sudo systemctl start docker
+              sudo systemctl enable docker
+            fi
+            
+            # Verificar que docker compose funciona
+            if ! sudo docker compose version &> /dev/null; then
+              echo "Docker Compose no está funcionando correctamente. Instalando plugin..."
+              sudo apt-get update
+              sudo apt-get install -y docker-compose-plugin
+            fi
+            
+            # Login a Docker Hub
+            echo "${{ secrets.DOCKER_TOKEN }}" | sudo docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+            
+            # Detener y eliminar contenedores existentes
+            echo "Deteniendo contenedores existentes..."
+            sudo docker compose down || true
+            sudo docker rm -f supplier-sync-service || true
+            
+            # Eliminar imágenes antiguas
+            echo "Eliminando imágenes antiguas..."
+            sudo docker rmi -f ${{ secrets.DOCKER_USERNAME }}/supplier-sync-service:latest || true
+            
+            # Forzar pull de la imagen más reciente
+            echo "Descargando imagen más reciente..."
+            sudo docker pull ${{ secrets.DOCKER_USERNAME }}/supplier-sync-service:latest
+            
+            # Crear .env file con secretos
+            cat > .env << EOL
+            DATABASE_URL=${{ secrets.DATABASE_URL || format('postgresql://{0}:{1}@{2}:{3}/{4}', secrets.DB_USER, secrets.DB_PASSWORD, secrets.DB_HOST, secrets.DB_PORT, secrets.DB_NAME) }}
+            RABBITMQ_HOST=${{ secrets.RABBITMQ_HOST }}
+            RABBITMQ_PORT=${{ secrets.RABBITMQ_PORT }}
+            RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
+            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+            RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
+            CELERY_BROKER_URL=${{ secrets.CELERY_BROKER_URL || format('amqp://{0}:{1}@{2}:{3}/{4}', secrets.RABBITMQ_USER, secrets.RABBITMQ_PASSWORD, secrets.RABBITMQ_HOST, secrets.RABBITMQ_PORT, secrets.RABBITMQ_VHOST) }}
+            CELERY_RESULT_BACKEND=${{ secrets.CELERY_RESULT_BACKEND || format('db+postgresql://{0}:{1}@{2}:{3}/{4}', secrets.DB_USER, secrets.DB_PASSWORD, secrets.DB_HOST, secrets.DB_PORT, secrets.DB_NAME) }}
+            SYNC_SCHEDULE="*/30 * * * *"
+            EOL
+            
+            # Crear docker-compose.yml
+            cat > docker-compose.yml << EOL
+            version: "3.8"
+            
+            services:
+              supplier-sync:
+                image: ${{ secrets.DOCKER_USERNAME }}/supplier-sync-service:latest
+                container_name: supplier-sync-service
+                restart: always
+                ports:
+                  - "8002:8002"
+                env_file:
+                  - .env
+                networks:
+                  - inventory-network
+            
+            networks:
+              inventory-network:
+                driver: bridge
+            EOL
+            
+            # Iniciar servicios
+            echo "Iniciando servicios..."
+            sudo docker compose up -d --force-recreate
+            
+            # Verificar estado
+            echo "Estado de los contenedores:"
+            sudo docker ps
             
       # Deploy Supplier Order Creator Service
       - name: Deploy Supplier Order Creator Service
@@ -85,11 +316,88 @@ jobs:
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /opt/inventory/supplier-order-creator
-            git pull
-            docker-compose down
-            docker-compose build --no-cache
-            docker-compose up -d
+            # Crear directorio de trabajo
+            mkdir -p ~/app/supplier-order-creator
+            cd ~/app/supplier-order-creator
+            
+            # Asegurarse de que Docker está instalado
+            if ! command -v docker &> /dev/null; then
+              echo "Docker no está instalado. Instalando..."
+              sudo apt-get update
+              sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+              sudo add-apt-repository "deb [arch=$(dpkg --print-architecture)] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+              sudo apt-get update
+              sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+              sudo usermod -aG docker $USER
+              sudo systemctl start docker
+              sudo systemctl enable docker
+            fi
+            
+            # Verificar que docker compose funciona
+            if ! sudo docker compose version &> /dev/null; then
+              echo "Docker Compose no está funcionando correctamente. Instalando plugin..."
+              sudo apt-get update
+              sudo apt-get install -y docker-compose-plugin
+            fi
+            
+            # Login a Docker Hub
+            echo "${{ secrets.DOCKER_TOKEN }}" | sudo docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+            
+            # Detener y eliminar contenedores existentes
+            echo "Deteniendo contenedores existentes..."
+            sudo docker compose down || true
+            sudo docker rm -f supplier-order-creator-service || true
+            
+            # Eliminar imágenes antiguas
+            echo "Eliminando imágenes antiguas..."
+            sudo docker rmi -f ${{ secrets.DOCKER_USERNAME }}/supplier-order-creator-service:latest || true
+            
+            # Forzar pull de la imagen más reciente
+            echo "Descargando imagen más reciente..."
+            sudo docker pull ${{ secrets.DOCKER_USERNAME }}/supplier-order-creator-service:latest
+            
+            # Crear .env file con secretos
+            cat > .env << EOL
+            DATABASE_URL=${{ secrets.DATABASE_URL || format('postgresql://{0}:{1}@{2}:{3}/{4}', secrets.DB_USER, secrets.DB_PASSWORD, secrets.DB_HOST, secrets.DB_PORT, secrets.DB_NAME) }}
+            RABBITMQ_HOST=${{ secrets.RABBITMQ_HOST }}
+            RABBITMQ_PORT=${{ secrets.RABBITMQ_PORT }}
+            RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
+            RABBITMQ_PASSWORD=${{ secrets.RABBITMQ_PASSWORD }}
+            RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
+            CELERY_BROKER_URL=${{ secrets.CELERY_BROKER_URL || format('amqp://{0}:{1}@{2}:{3}/{4}', secrets.RABBITMQ_USER, secrets.RABBITMQ_PASSWORD, secrets.RABBITMQ_HOST, secrets.RABBITMQ_PORT, secrets.RABBITMQ_VHOST) }}
+            CELERY_RESULT_BACKEND=${{ secrets.CELERY_RESULT_BACKEND || format('db+postgresql://{0}:{1}@{2}:{3}/{4}', secrets.DB_USER, secrets.DB_PASSWORD, secrets.DB_HOST, secrets.DB_PORT, secrets.DB_NAME) }}
+            ORDER_SCHEDULE="0 */2 * * *"
+            EOL
+            
+            # Crear docker-compose.yml
+            cat > docker-compose.yml << EOL
+            version: "3.8"
+            
+            services:
+              supplier-order-creator:
+                image: ${{ secrets.DOCKER_USERNAME }}/supplier-order-creator-service:latest
+                container_name: supplier-order-creator-service
+                restart: always
+                ports:
+                  - "8003:8003"
+                env_file:
+                  - .env
+                networks:
+                  - inventory-network
+            
+            networks:
+              inventory-network:
+                driver: bridge
+            EOL
+            
+            # Iniciar servicios
+            echo "Iniciando servicios..."
+            sudo docker compose up -d --force-recreate
+            
+            # Verificar estado
+            echo "Estado de los contenedores:"
+            sudo docker ps
             
       - name: Create Deployment Summary
         run: |
