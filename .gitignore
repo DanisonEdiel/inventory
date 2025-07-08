@@ -59,7 +59,7 @@ docker-compose.override.yml
 *.tfvars
 .terragrunt-cache/
 terraform.tfvars
-
+.set-aws-credentials.ps1
 # Celery
 celerybeat-schedule
 celerybeat.pid
